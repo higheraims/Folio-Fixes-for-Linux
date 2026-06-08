@@ -47,8 +47,22 @@ chmod +x folio-views.sh folio-clipboard-fix.py
 export FOLIO_EXE="$HOME/.wine/drive_c/Folio/Views.exe"
 ./folio-views.sh
 ```
-
 `folio-views.sh` starts the daemon, launches Folio via WINE, and kills the daemon when Folio exits. Nothing else needs to change.
+
+On my system, it works out like this:
+
+```bash
+WINEPREFIX=$HOME/.wine $HOME/Folio-Fixes-for-Linux/folio-views.sh '/home/$USER/.wine/drive_c/Estate/Research Ed/Folio/Views.exe' 'C:\Estate\Research\Folio\Books\egw-comp.sdw'
+```
+(Adjust the path to the .sh file and replace $USER with the right user folder)
+
+### Dependencies for above
+
+Assuming you already have a working WINE installation with Folio Views installed, the only other dependency you're likely to need is Python-pyqt6. Install on Fedora (the distro I run) goes like this:
+
+``` bash
+sudo dnf install python3-pyqt6
+```
 
 ### Running the daemon standalone
 
