@@ -75,31 +75,29 @@ python3 folio-clipboard-fix.py --verbose  # print a line on each clean
 
 ---
 
-## Fix 2 — WINE upstream patch (proper long-term fix)
+## Fix 2 — Upgrade WINE (fixes the root cause)
 
-The correct fix is a one-line change in WINE's source code. The relevant file is:
+**This bug is already fixed in current WINE.** The `dlls/winex11.drv/clipboard.c` file in WINE master no longer uses `GlobalSize()` to size clipboard exports. It now uses a `string_from_unicode_text()` helper that explicitly strips trailing null bytes after the unicode conversion, so binary data after the CF_TEXT null terminator is never written to the X11 selection.
 
-```
-dlls/winex11.drv/clipboard.c
-```
+If you are seeing the problem, your installed WINE is an older version from your distribution's repositories. Upgrading to a current WINE build will fix it at the source and make the clipboard daemon unnecessary.
 
-The function that exports `CF_TEXT` / `CF_OEMTEXT` data to X11 uses `GlobalSize(handle)` to determine the byte count. It should use `strlen(ptr)` (or `strnlen` with the global size as the bound) instead:
+### Upgrading to current WINE on Fedora
 
-```c
-/* BEFORE (wrong) */
-size_t len = GlobalSize(handle);
+Add the WineHQ repository and install the stable or development release:
 
-/* AFTER (correct) */
-const char *ptr = GlobalLock(handle);
-size_t len = strnlen(ptr, GlobalSize(handle));
-GlobalUnlock(handle);
+```bash
+sudo dnf config-manager --add-repo \
+  https://dl.winehq.org/wine-builds/fedora/$(rpm -E %fedora)/winehq.repo
+sudo dnf install winehq-stable
+# or for the latest development build:
+# sudo dnf install winehq-devel
 ```
 
-For `CF_UNICODETEXT` the analogous fix is to use `wcslen(ptr) * sizeof(WCHAR)` rather than `GlobalSize(handle)`.
+### Why the daemon is still useful
 
-This patch should be submitted upstream to the [WINE bug tracker](https://bugs.winehq.org/). Any distribution that ships a patched WINE would fix the problem for all affected Windows applications, not just Folio Views.
-
-If someone has some clout with the folks over at WINE, please be my guest and try to get this done.
+- Users on distribution-provided WINE (which often lags years behind upstream) will still see the bug.
+- The daemon is harmless on a fixed WINE — it polls every 150 ms, never finds a null byte, and does nothing.
+- It also guards against any other application that puts null bytes in clipboard text.
 
 ---
 
