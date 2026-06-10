@@ -75,29 +75,42 @@ python3 folio-clipboard-fix.py --verbose  # print a line on each clean
 
 ---
 
-## Fix 2 — Upgrade WINE (fixes the root cause)
+## Fix 2 — WINE upstream status (not yet properly fixed)
 
-**This bug is already fixed in current WINE.** The `dlls/winex11.drv/clipboard.c` file in WINE master no longer uses `GlobalSize()` to size clipboard exports. It now uses a `string_from_unicode_text()` helper that explicitly strips trailing null bytes after the unicode conversion, so binary data after the CF_TEXT null terminator is never written to the X11 selection.
+The WINE clipboard export code has been significantly refactored, but **the Folio case remains broken as of Wine 11 Staging (empirically confirmed).**
 
-If you are seeing the problem, your installed WINE is an older version from your distribution's repositories. Upgrading to a current WINE build will fix it at the source and make the clipboard daemon unnecessary.
+### What WINE did change
 
-### Upgrading to current WINE on Fedora
+Commit `55bbe99c` ("winex11: Use data-only NtUserGetClipboardData to export clipboard data", April 2022, first stable release wine-8.0) removed direct `GlobalSize()` calls from `dlls/winex11.drv/clipboard.c`. The export functions no longer call `GlobalLock`/`GlobalSize`/`GlobalUnlock` themselves — they receive a pre-marshalled flat buffer from `NtUserGetClipboardData`.
 
-Add the WineHQ repository and install the stable or development release:
+`GlobalSize()` is genuinely gone from that file in all releases from wine-7.8 onwards.
 
-```bash
-sudo dnf config-manager --add-repo \
-  https://dl.winehq.org/wine-builds/fedora/$(rpm -E %fedora)/winehq.repo
-sudo dnf install winehq-stable
-# or for the latest development build:
-# sudo dnf install winehq-devel
+### Why the bug persists anyway
+
+The buffer passed into the export path still originates from the full `HGLOBAL` allocation. More critically, the only null-stripping that occurs is in `string_from_unicode_text()`:
+
+```c
+while (j && !str[j - 1]) j--;   // strips trailing null bytes only
 ```
 
-### Why the daemon is still useful
+This walks backwards from the **end** of the buffer and stops at the first non-null byte. Folio's binary metadata is not null padding — it is real binary data (Windows memory handles and heap addresses). The last bytes of the garbage are non-null values like `0xFF`, `0x54`, `0xB8`. The loop stops immediately and the entire garbage block is still exported to X11.
 
-- Users on distribution-provided WINE (which often lags years behind upstream) will still see the bug.
-- The daemon is harmless on a fixed WINE — it polls every 150 ms, never finds a null byte, and does nothing.
-- It also guards against any other application that puts null bytes in clipboard text.
+In short: the fix addresses applications that pad their clipboard data with extra trailing `\x00` bytes. It does not address applications like Folio Views that store structured binary data after the null terminator.
+
+### What a proper fix would look like
+
+The export path needs to treat CF_TEXT as a C string and truncate at the first null byte, not strip nulls from the tail:
+
+```c
+/* current behaviour — strips trailing nulls only, misses mid-buffer garbage */
+while (j && !str[j - 1]) j--;
+
+/* correct behaviour for CF_TEXT — truncate at the null terminator */
+size_t text_len = strnlen(str, len);
+j = (DWORD)text_len;
+```
+
+This would be the appropriate patch to submit to the [WINE bug tracker](https://bugs.winehq.org/). It is a small, safe change that only affects the text export path and matches the documented Windows convention for CF_TEXT.
 
 ---
 
